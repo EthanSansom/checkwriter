@@ -187,9 +187,7 @@ new_slow_check <- function(
   out
 }
 
-# TODO: We'll need versions for:
-# - <vectorized_check>, <slow> and <fast> also
-# - <semi_vectorized_check>, <slow> and <fast> also
+# vectorized check -------------------------------------------------------------
 
 new_vectorized_check <- function(
     fmls,          # pairlist of formals
@@ -280,6 +278,239 @@ new_vectorized_check <- function(
   )
   class(out) <- c(
     "checkwriter_vectorized_check",
+    "checkwriter_check",
+    "checkwriter_fun",
+    "function"
+  )
+  out
+}
+
+new_vectorized_fast_check <- function(
+    fmls,
+    fixed_fmls,
+    test,
+    return_value,
+    bullets,
+    header,
+    mapper,
+    x_reindexed,
+    x_renamed,
+    env
+) {
+
+  # Remove/re-set parts of a <vectorized_check> to make a <vectorized_fast_check>
+  get_fast_abort_call <- function(x) { fun_body(x)[[3]][[3]][[2]] }
+  set_last_abort_call <- function(x, expr) {
+    fun_body(x)[[9]] <- expr
+    x
+  }
+  remove_fast_if_block_and_retesting <- function(x) {
+    fun_body(x)[3:8] <- NULL
+    x
+  }
+
+  out <- new_vectorized_check(
+    fmls = fmls,
+    fixed_fmls = fixed_fmls,
+    test = test,
+    return_value = return_value,
+    bullets = bullets,
+    header = header,
+    mapper = mapper,
+    x_reindexed = x_reindexed,
+    x_renamed = x_renamed,
+    env = env
+  )
+  out <- set_last_abort_call(out, expr = get_fast_abort_call(out))
+  out <- remove_fast_if_block_and_retesting(out)
+
+  class(out) <- c("checkwriter_vectorized_fast_check", class(out))
+  out
+}
+
+new_vectorized_slow_check <- function(
+    fmls,
+    fixed_fmls,
+    test,
+    return_value,
+    bullets,
+    header,
+    mapper,
+    x_reindexed,
+    x_renamed,
+    env
+) {
+
+  # Remove parts a <vectorized_check> to make a <vectorized_slow_check>
+  remove_fast_if_block <- function(x) {
+    fun_body(x)[[3]] <- NULL
+    x
+  }
+
+  out <- new_vectorized_check(
+    fmls = fmls,
+    fixed_fmls = fixed_fmls,
+    test = test,
+    return_value = return_value,
+    bullets = bullets,
+    header = header,
+    mapper = mapper,
+    x_reindexed = x_reindexed,
+    x_renamed = x_renamed,
+    env = env
+  )
+  out <- set_last_abort_call(out, expr = get_fast_abort_call(out))
+  out <- remove_fast_if_block(out)
+
+  class(out) <- c("checkwriter_vectorized_slow_check", class(out))
+  out
+}
+
+# semi-vectorized check --------------------------------------------------------
+
+new_semi_vectorized_check <- function(
+    fmls,          # pairlist of formals
+    fixed_fmls,    # named list of fixed formals and their defaults
+    test_novec,    # test expression (don't vectorize)
+    test_vec,      # test expression (do vectorize)
+    return_value,  # return value expression
+    bullets_novec, # bullets expression for the un-vectorized test
+    bullets_vec,   # bullets expression for the vectorized bullets
+    header,        # header expression
+    mapper,        # mapper function used for vectorization
+    x_reindexed,   # expression used to re-index x
+    x_renamed,     # expression used to re-name x
+    env            # environment where the <check> is defined
+) {
+
+  # TODO: Add internal errors for bad inputs
+
+  # E.g. `purrr::map_lgl(x, \(x) is.integer(x) && 1L == length(x))`
+  vectorized_test <- rlang::call2(
+    .fn = mapper,
+    rlang::expr(x),
+    rlang::expr(\(x) { !!remove_t_assignments(test_vec) })
+  )
+
+  test_novec_results <- find_symbols(test_novec, pattern = the$t_symbol_pattern)
+  test_vec_results <- find_symbols(test_novec, pattern = the$t_symbol_pattern)
+  test_results <- append(test_novec_results, test_vec_results)
+
+  bullets <- rlang::call2(
+    .fn = "and_bullets",
+    .ns = "checkwriter",
+    bullets_novec,
+    bullets_vec
+  )
+
+  error_arguments <- error_arguments(
+    error_fmls_nms = c(
+      "error_header",
+      "error_bullets",
+      "error_class",
+      "error_dots",
+      "error_fast"
+    ),
+    fixed_fmls = fixed_fmls
+  )
+  slow_error_header <- slow_error_header(
+    default_error_header = header,
+    fixed_fmls_nms = rlang::names2(fixed_fmls)
+  )
+  slow_error_bullets <- slow_error_bullets(
+    default_error_bullets = bullets,
+    fixed_fmls_nms = rlang::names2(fixed_fmls)
+  )
+  slow_error_bullets_vec <- slow_error_bullets(
+    default_error_bullets = bullets_vec,
+    fixed_fmls_nms = rlang::names2(fixed_fmls)
+  )
+
+  body <- rlang::expr({
+    if ((!!test_novec) %and% all(.t0. <- !!vectorized_test)) {
+      return(!!return_value)
+    }
+    if (!!error_arguments$error_fast) {
+      checkwriter::checkwriter_abort(
+        header = !!error_arguments$error_header,
+        bullets = !!error_arguments$error_bullets,
+        error_class = !!error_arguments$error_class,
+        error_call = error_call,
+        error_dots = !!error_arguments$error_dots
+      )
+    }
+
+    # If `.t0.` is undefined, then we never ran the vectorized test, so we
+    # emit the un-vectorized test error.
+    if (!rlang::env_has(".t0.")) {
+      # Sadly we have to bind all of the test results here, so that we can
+      # support the emission of `switch_bullets(untested = "")` bullets.
+      checkwriter::bind_test_results(!!!test_results)
+      checkwriter::checkwriter_abort(
+        header = !!slow_error_header,
+        # We emit all the bullets (vectorized and un-vectorized) so that we
+        # can potentially run untested bullets here.
+        bullets = !!slow_error_bullets,
+        error_class = !!error_arguments$error_class,
+        error_call = error_call,
+        error_dots = !!error_arguments$error_dots
+      )
+    }
+
+    # TODO: For error emission of the bullets to work correctly, we'll still
+    #       have to make sure the `.t*.` symbols are unique between both the
+    #       vectorized AND un-vectorized tests. This is because the default
+    #       bullets can make use of the `.t*.` symbols and so we need to ensure
+    #       that the bullets for vectorized tests don't refer to a result from
+    #       an un-vectorized test. Notice that the `slow_error_bullets` which
+    #       are emitted are the same for BOTH tests. In fact, we actually CAN'T
+    #       unbind the old bullets, since we're allowing for `pass` hints.
+    #
+    # TLDR: I just realized that:
+    # 1. We need to make sure that the vectorized AND un-vectorized tests need
+    #    distinct `.t*` symbols, with the vectorized coming AFTER (in numeric
+    #    order) the vectorized.
+    # 2. We have to provide the last error ALL of the bullets, even those from
+    #    the un-vectorized test (which we know succeeded), since we allow for
+    #    pass bullets.
+    #
+    # Unbind the un-vectorized test results and proceed as usual with emitting
+    # the vectorized test error.
+    # checkwriter::unbind_test_results()
+
+    # UGHHHH, if we want to support pass bullets then we actually need
+    # to evaluate all of the un-vectorized bullets here, so that they refer
+    # to the correct `x_name` and then we need to evaluate all of the vectorized
+    # bullets later, after we've switch the `x_name`.
+    unvectorized_bullets <- !!bullets_vec
+
+    force(x_name)
+    x <- !!x_reindexed
+    x_name <- !!x_renamed
+    !!test_vec
+
+    # We only need to re-bind the vectorized test results, because these are the
+    # only tests which we re-tested.
+    checkwriter::bind_test_results(!!!test_vec_results)
+    checkwriter::checkwriter_abort(
+      header = !!slow_error_header,
+      # TODO: UGGGGH, this won't do, since we need to make sure that `unvectorized_bullets`
+      # is included in the emission here... So we'll have to declare `slow_error_bullets_vec`
+      # with a reference to `unvectorized_bullets`
+      bullets = !!slow_error_bullets_vec,
+      error_class = !!error_arguments$error_class,
+      error_call = error_call,
+      error_dots = !!error_arguments$error_dots
+    )
+  })
+
+  out <- rlang::new_function(
+    args = fmls,
+    body = body,
+    env = env
+  )
+  class(out) <- c(
+    "checkwriter_semi_vectorized_check",
     "checkwriter_check",
     "checkwriter_fun",
     "function"
