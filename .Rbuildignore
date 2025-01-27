@@ -1,2 +1,4 @@
 ^checkwriter\.Rproj$
 ^\.Rproj\.user$
+^\R\-scratch
+^LICENSE\.md$
