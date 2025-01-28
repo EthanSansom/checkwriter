@@ -41,22 +41,83 @@ assert_no_reserved_symbols <- function(
     expr_name = rlang::caller_arg(expr),
     error_call = rlang::caller_env()
 ) {
-  reserved_symbols <- find_symbols(expr, pattern = "\\.t[0-9]+\\.")
-  if (!is_empty(reserved_symbols)) {
+  reserved_t_symbols <- find_symbols(expr, pattern = the$t_symbol_pattern)
+  if (!is_empty(reserved_t_symbols)) {
     cli::cli_abort(
       message = c(
         paste(
           "{.arg {expr_name}} must not contain any symbols matching the",
-          "pattern {.val {'.t[0-9]+.'}}."
+          "pattern {.val {the$t_symbol_pattern}}."
         ),
         x = paste(
-          "{.arg {expr_name}} contains{cli::qty(length(reserved_symbols))}",
-          "{?the/} symbol{?s}: {.arg {reserved_symbols}}."
+          "{.arg {expr_name}} contains{cli::qty(length(reserved_t_symbols))}",
+          "{?the/} symbol{?s}: {.arg {reserved_t_symbols}}."
         ),
-        i = "The {.pkg checkwriter} package reserves these symbol for use in tests."
+        i = "The {.pkg checkwriter} package reserves these symbols for use in checks and tests."
       )
     )
   }
+  reserved_bullets_symbols <- find_symbols(
+    expr,
+    symbols = c(".vectorized_bullets.", ".unvectorized_bullets.")
+  )
+  if (!is_empty(reserved_bullets_symbols)) {
+    cli::cli_abort(
+      message = c(
+        paste(
+          "{.arg {expr_name}} must not contain the symbol {.arg .vectorized_bullets.}",
+          "or the symbol {.arg .unvectorized_bullets.}."
+        ),
+        x = if (".vectorized_bullets." %in% reserved_bullets_symbols) {
+          "{.arg {expr_name}} contains the symbol {.arg .vectorized_bullets.}."
+        },
+        x = if (".unvectorized_bullets." %in% reserved_bullets_symbols) {
+          "{.arg {expr_name}} contains the symbol {.arg .unvectorized_bullets.}."
+        },
+        i = "The {.pkg checkwriter} package reserves these symbols for use in checks and tests."
+      )
+    )
+  }
+}
+
+# checks -----------------------------------------------------------------------
+
+check_is_env <- function(
+    x,
+    x_name = rlang::caller_arg(x),
+    error_call = rlang::caller_env(),
+    error_class = the$errors$invalid_argument
+  ) {
+  if (rlang::is_environment(x)) {
+    return(x)
+  }
+  cli::cli_abort(
+    message = c(
+      "{.arg {x_name}} must be an environment.",
+      x = "{.arg {x_name}} is {.obj_type_friendly {x}}."
+    ),
+    call = error_call,
+    class = c("checkwriter_error", error_class)
+  )
+}
+
+check_is_test <- function(
+    x,
+    x_name = rlang::caller_arg(x),
+    error_call = rlang::caller_env(),
+    error_class = the$errors$invalid_argument
+) {
+  if (is_test(x)) {
+    return(x)
+  }
+  cli::cli_abort(
+    message = c(
+      "{.arg {x_name}} must be a {.cls checkwriter_test}",
+      x = "{.arg {x_name}} is {.obj_type_friendly {x}}."
+    ),
+    call = error_call,
+    class = c("checkwriter_error", error_class)
+  )
 }
 
 # friendlyr functions ----------------------------------------------------------

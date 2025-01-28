@@ -170,12 +170,3 @@ set_return_value.checkwriter_check <- function(x, expr) {
   fun_body(x)[[2]][[3]][[2]][[2]] <- expr
   x
 }
-
-# vectorized -------------------------------------------------------------------
-
-# TODO: We'll need specific getters and setters for the following:
-# - checkwriter_check_vectorized      -> fully vectorized tests
-# - checkwriter_check_semi_vectorized -> vectorized and un-vectorized tests
-#
-# In the semi-vectorized case, we'll need accessors `get_*_vectorized()` and
-# `get_*_unvectorized()` to access each set of tests, bullets, etc.

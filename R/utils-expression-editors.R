@@ -46,7 +46,8 @@ replace_symbols <- function(expr, ...) {
           # `expr[[2]]` is a pairlist of the formals, we replace the defaults.
           expr[[2]] <- replace_symbols_recursive(expr[[2]])
           expr
-        } else {
+        }
+        else {
           # Replace symbols in the call argument
           as.call(append(expr[[1]], map(as.list(expr[-1]), replace_symbols_recursive)))
         }
@@ -119,6 +120,9 @@ contains_symbols <- function(expr, symbols, pattern) {
 
 # Replace expressions in `expr` of the form `.t*. <- <value>` with `<value>`
 remove_t_assignments <- function(expr) {
+  is_t_symbol <- function(x) {
+    rlang::is_symbol(x) && grepl(the$t_symbol_pattern, x)
+  }
   switch(
     expr_type(expr),
     constant = ,
@@ -133,10 +137,6 @@ remove_t_assignments <- function(expr) {
       }
     }
   )
-}
-
-is_t_symbol <- function(x) {
-  rlang::is_symbol(x) && grepl(the$t_symbol_pattern, x)
 }
 
 # Return the type of an `expr` as a string

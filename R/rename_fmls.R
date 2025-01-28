@@ -1,13 +1,8 @@
-# TODO: Add a `remove_fmls()` function which allows the user to unconditionally
-# remove formals from the function, but warns them if the symbol is found in the
-# function body. Don't allow `x` or `x_name` to be removed (or other invariants,
-# we might potentially require `error_call` for forwarding errors.
-
 rename_fmls <- function(.fun, ...) {
   UseMethod("rename_fmls")
 }
 
-rename_fmls.checkmaker_test <- function(.fun, ...) {
+rename_fmls.checkwriter_test <- function(.fun, ...) {
   assert_closure(.fun)
   c(old_fmls_names, new_fmls_names) %<-% validate_rename_fmls_dots(.fun, ...)
 
@@ -29,7 +24,7 @@ rename_fmls.checkmaker_test <- function(.fun, ...) {
   .fun
 }
 
-rename_fmls.checkmaker_check <- function(.fun, ...) {
+rename_fmls.checkwriter_check <- function(.fun, ...) {
   assert_closure(.fun)
   c(old_fmls_names, new_fmls_names) %<-% validate_rename_fmls_dots(.fun, ...)
 
@@ -131,7 +126,10 @@ validate_rename_fmls_dots <- function(
     cli::cli_abort(
       message = c(
         "Can't rename formals that aren't in {.arg {(.fun_name)}}.",
-        x = "{.arg {(.fun_name)}} doesn't have {?a formal argument/the formal arguments} {.arg {old_fmls_names[nomatch_at]}}."
+        x = paste(
+          "{.arg {(.fun_name)}} doesn't have {?a/the} formal argument{?s}",
+          "{.arg {old_fmls_names[nomatch_at]}}."
+        )
       ),
       call = .error_call,
       class = the$errors$invalid_argument

@@ -1,7 +1,7 @@
+# the --------------------------------------------------------------------------
+
 # TODO: Check other packages for where stuff like this normally lives...
 # {rlang} puts it here: https://github.com/r-lib/rlang/blob/main/R/aaa.R
-
-# the --------------------------------------------------------------------------
 
 the <- rlang::new_environment(
   list(
@@ -17,8 +17,6 @@ the <- rlang::new_environment(
     t_symbol_pattern = "\\.t[0-9]+\\."
   )
 )
-
-# misc -------------------------------------------------------------------------
 
 # TODO: This avoids the CRAN check associated with using zeallot::`%<-%`. I may
 # just not use {zeallot}, we'll see. https://github.com/r-lib/zeallot/issues/57

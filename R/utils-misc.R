@@ -33,12 +33,16 @@ map2_lgl <- function(.x, .y, .f, ...) {
   as.vector(map2(.x, .y, .f, ...), "logical")
 }
 
+keep <- function(.x, .p, ...) {
+  .x[map_lgl(.x, .p, ...)]
+}
+
 # rlang stand-ins --------------------------------------------------------------
 
 # All credit to {rlang}, these functions are nearly identical to `rlang::fn_fmls()`
 # and `rlang::fn_body()`. I'm re-implementing them here for two reasons:
 #
-# 1. To skip their input validation (my inputs come validated at a higher level)
+# 1. To skip their input validation (my inputs come validated from the caller)
 # 2. `rlang::fn_fmls<-` doesn't yet remove the `srcref` attribute for printing:
 #    https://github.com/r-lib/rlang/issues/1662
 
@@ -82,6 +86,20 @@ is_expr <- function(x) {
 
 is_symbolish <- function(x) {
   rlang::is_symbol(x) || (rlang::is_string(x) && nchar(x) >= 1)
+}
+
+# Is `x` a call to `checkwriter::fun()`? If the call isn't namespaced, we check
+# if the call's function is identical to `fun` when evaluated in `env`.
+is_checkwriter_call <- function(x, fun, env = rlang::caller_env()) {
+  rlang::is_call(
+    x,
+    name = rlang::as_string(rlang::enexpr(fun)),
+    ns = "checkwriter"
+  ) ||
+  (
+    rlang::is_call(x) &&
+    identical(eval(x[[1]], envir = env), fun)
+  )
 }
 
 symbol_dict <- function(x) {
