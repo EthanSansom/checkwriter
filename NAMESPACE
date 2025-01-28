@@ -2,6 +2,7 @@
 
 export(bind_test_results)
 export(checkwriter_abort)
+export(internal_switch_bullets)
 export(switch_bullets)
 export(unbind_test_results)
 importFrom(zeallot,"%<-%")
