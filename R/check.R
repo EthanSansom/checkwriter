@@ -1,39 +1,116 @@
 # check ------------------------------------------------------------------------
 
-# TODO: Define the interface through which a user creates a <check>.
+# TODO: Implement and see TODO below:
+check_opts <- function(
+    # Are my return values potentially missing?
+    maybe_missing = FALSE,
+
+    # Which `error_*` formals (besides `error_call`) should we keep
+    keep_error_fmls = c("error_dots", "error_class", "error_header", "error_bullets"),
+
+    # Which `arg_name` formals should we keep (besides `x_name`).
+    # If `NULL`, keeps all of them.
+    keep_arg_name_fmls = NULL
+  ) {
+  stucture(
+    list(
+      maybe_missing = check_bool(maybe_missing),
+      keep_error_fmls = check_subset(
+        keep_error_fmls,
+        set = c("error_dots", "error_class", "error_header", "error_bullets"),
+        empty_ok = TRUE
+      ),
+      keep_arg_name_fmls = check_chr(
+        keep_arg_name_fmls,
+        null_ok = TRUE,
+        any_na_ok = FALSE
+      )
+    ),
+    class = c("checkwriter_check_opts", "list")
+  )
+}
+
+check <- function(
+    test,
+    header,
+    bullets,
+    env = rlang::caller_env(),
+    # TODO: Make a `check_opts()` function which produces a <checkwriter_check_opts>
+    # class object. That way you can save a default `my_check_opts = check_opts(...)`
+    # object and pass it around
+    #
+    # TODO: See how many of these accumulate, you might be able to remove them
+    opts = list(maybe_missing = FALSE)
+  ) {
+
+  # TODO: We'll want a fast way to provide default `header` and `bullets` by
+  # capturing the `test` expression and using that somehow. Look at nice ways
+  # to format expressions in {rlang}. Do similar error messages to the
+  # defaults for `stopifnot()`.
+
+  # TODO: Validate `opts`
+
+  # TODO: Might want to try_fetch here in case either of these was spliced in
+  # and explodes for `header` and `bullets`.
+  test <- check_is_test(test)
+  header <- rlang::enexpr(header)
+  bullets <- rlang::enexpr(bullets)
+  env <- check_is_env(env)
+  caller_env <- rlang::caller_env()
+
+  # Let's make the formals!
+  test_fmls <- fun_fmls(test)
+  name_fmls <- rlang::set_names(
+    x = map(
+      rlang::syms(names(test_fmls)),
+      \(fml) rlang::expr(rlang::caller_arg(!!fml))
+    ),
+    nm = paste0(names(test_fmls), "_name")
+  )
+  error_fmls <- list(
+    error_call = rlang::expr(rlang::caller_env()),
+    error_header = NULL,
+    error_bullets = NULL,
+    error_class = NULL,
+    error_fast = FALSE,
+    error_dots = rlang::expr(list())
+  )
+  fmls <- rlang::pairlist2(
+    !!!test_fmls,
+    !!!name_fmls,
+    !!!error_fmls
+  )
+
+  test <- rlang::expr(.t1. <- (!!get_test(test)))
+  bullets <- if (is_checkwriter_call(bullets, switch_bullets, env = caller_env)) {
+    rlang::call2(
+      .fn = "internal_switch_bullets",
+      .ns = "checkwriter",
+      rlang::expr(.t1.),
+      !!!rlang::call_args(bullets)
+    )
+  } else {
+    rlang::expr(checkwriter::internal_switch_bullets(.t1., fail = !!bullets))
+  }
+  return_value <- new_return_value(test_fmls, maybe_missing = opts$maybe_missing)
+
+  new_check(
+    fmls = fmls,
+    fixed_fmls = list(),
+    test = test,
+    return_value = return_value,
+    header = header,
+    bullets = bullets,
+    env = env
+  )
+}
+
 # TODO: Define the <check> class and sub-classes.
 
 # TODO: Check {rlang} for how they implement some of their magic. The bottom
 # of this file https://github.com/r-lib/rlang/blob/main/R/fn.R has some cool
 # manipulation of primitive functions to take a look at.
 
-# TODO:
-# I think that `.header`, `.bullets`, etc. should be captured as expressions
-# and, if you want to insert a quoted expression instead, you can splice it in.
-#
-# This is the real benefit of using {rlang}. It provides users with access to
-# argument splicing with `!!!` and `!!`.
-if (FALSE) {
-  f <- function(expr) {
-    rlang::enexpr(expr)
-  }
-
-  message1 <- function() { "my message" }
-
-  f(message1())   # `message1()` is just quoted
-  f(!!message1()) # `message1()` is evaluated, then quoted
-
-  my_quoted_message_call <- quote(message1())
-  f(my_quoted_message_call)   # Quotes `my_quoted_message_call`, bad
-  f(!!my_quoted_message_call) # Quotes `message1()`, good
-
-  eval(f(my_quoted_message_call)) |> print() |> class()
-  eval(f(!!my_quoted_message_call)) |> print() |> class()
-}
-
-# TODO: Before moving onto the new_slow/fast_check functions, test `new_check()`
-# so we know it's working as expected!
-#
 # TODO: See if you can just use `new_check()` and then for `new_slow_check()`
 # and `new_fast_check()`, just remove the section of the body which is unique
 # to the slow/fast check.
@@ -52,7 +129,7 @@ new_check <- function(
   # TODO: These should be internal errors
   stopifnot(
     is.pairlist(fmls) || is.list(fmls),
-    is.list(fixed_fmls) && rlang::is_named(fixed_fmls),
+    is.list(fixed_fmls) && (is_empty(fixed_fmls) || rlang::is_named(fixed_fmls)),
     is_expr(test),
     is_expr(return_value),
     is_expr(bullets),
@@ -385,7 +462,6 @@ new_semi_vectorized_check <- function(
 
   # TODO: Add internal errors for bad inputs
 
-  # E.g. `purrr::map_lgl(x, \(x) is.integer(x) && 1L == length(x))`
   vectorized_test <- rlang::call2(
     .fn = mapper,
     rlang::expr(x),
@@ -393,13 +469,35 @@ new_semi_vectorized_check <- function(
   )
 
   test_novec_results <- find_symbols(test_novec, pattern = the$t_symbol_pattern)
-  test_vec_results <- find_symbols(test_novec, pattern = the$t_symbol_pattern)
+  test_vec_results <- find_symbols(test_vec, pattern = the$t_symbol_pattern)
   test_results <- append(test_novec_results, test_vec_results)
 
+  # Within the `<semi_vectorized_check>`, we assign a copy of `bullets_novec` to
+  # `unvectorized_bullets` *before* re-running the vectorized test with an
+  # updated `x = x_reindexed` and `x_name = x_renamed`. This ensures, in the
+  # event that the un-vectorized test passed and the vectorized test failed,
+  # that any `pass` bullets from un-vectorized test refer to the correct `x` and
+  # `x_name`. We later assign `bullets_vec` to `vectorized_bullets` so that the
+  # `bullets_novec` and `bullets_vec` can be easily retrieved from an existing
+  # <semi_vectorized_check>.
   bullets <- rlang::call2(
     .fn = "and_bullets",
     .ns = "checkwriter",
-    bullets_novec,
+    # TODO: Add these to the list of reserved symbols.
+    rlang::sym(".unvectorized_bullets."),
+    rlang::sym(".vectorized_bullets.")
+  )
+
+  # In the case that we failed the un-vectorized test, we want to emit all
+  # of `.unvectorized_bullets. <- bullets_novec` and any vectorized test `untested`
+  # bullets in `bullets_vec`. If there are no `switch_bullets(untested = ...)` in
+  # the vectorized bullets, we can emit them from these bullets.
+  bullets_unvectorized_failure <- rlang::call2(
+    .fn = "and_bullets",
+    .ns = "checkwriter",
+    rlang::sym(".unvectorized_bullets."),
+    # TODO: Implement a `resolve_untested_bullets(bullets_vec)` to remove this
+    # if there aren't any untested bullets to emit.
     bullets_vec
   )
 
@@ -421,8 +519,8 @@ new_semi_vectorized_check <- function(
     default_error_bullets = bullets,
     fixed_fmls_nms = rlang::names2(fixed_fmls)
   )
-  slow_error_bullets_vec <- slow_error_bullets(
-    default_error_bullets = bullets_vec,
+  slow_error_bullets_novec <- slow_error_bullets(
+    default_error_bullets = bullets_unvectorized_failure,
     fixed_fmls_nms = rlang::names2(fixed_fmls)
   )
 
@@ -440,17 +538,22 @@ new_semi_vectorized_check <- function(
       )
     }
 
+    # We need to evaluate the un-vectorized bullets immediately to ensure that
+    # they refer to the correct `x` and `x_name` prior to re-assignment of `x`
+    # and `x_name` for the un-vectorized tests. This also makes it easy to
+    # retrieve the vectorized and un-vectorized bullets from an existing check.
+    .unvectorized_bullets. <- !!bullets_novec
+
     # If `.t0.` is undefined, then we never ran the vectorized test, so we
     # emit the un-vectorized test error.
     if (!rlang::env_has(".t0.")) {
-      # Sadly we have to bind all of the test results here, so that we can
-      # support the emission of `switch_bullets(untested = "")` bullets.
+      # We need to bind all test results, including the un-tested vectorized test
+      # results, in case there are `switch_bullets(untested = ...)` bullets for
+      # the vectorized tests.
       checkwriter::bind_test_results(!!!test_results)
       checkwriter::checkwriter_abort(
         header = !!slow_error_header,
-        # We emit all the bullets (vectorized and un-vectorized) so that we
-        # can potentially run untested bullets here.
-        bullets = !!slow_error_bullets,
+        bullets = !!slow_error_bullets_novec,
         error_class = !!error_arguments$error_class,
         error_call = error_call,
         error_dots = !!error_arguments$error_dots
@@ -470,34 +573,22 @@ new_semi_vectorized_check <- function(
     # 1. We need to make sure that the vectorized AND un-vectorized tests need
     #    distinct `.t*` symbols, with the vectorized coming AFTER (in numeric
     #    order) the vectorized.
-    # 2. We have to provide the last error ALL of the bullets, even those from
-    #    the un-vectorized test (which we know succeeded), since we allow for
-    #    pass bullets.
-    #
-    # Unbind the un-vectorized test results and proceed as usual with emitting
-    # the vectorized test error.
-    # checkwriter::unbind_test_results()
-
-    # UGHHHH, if we want to support pass bullets then we actually need
-    # to evaluate all of the un-vectorized bullets here, so that they refer
-    # to the correct `x_name` and then we need to evaluate all of the vectorized
-    # bullets later, after we've switch the `x_name`.
-    unvectorized_bullets <- !!bullets_vec
 
     force(x_name)
     x <- !!x_reindexed
     x_name <- !!x_renamed
     !!test_vec
 
-    # We only need to re-bind the vectorized test results, because these are the
-    # only tests which we re-tested.
+    # We evaluate the vectorized bullets here so that they are easier to get
+    # and set in existing <semi_vectorized_check>'s.
+    .vectorized_bullets. <- !!bullets_vec
+
+    # We only need to re-bind the vectorized test results, as these are the only
+    # tests which we re-ran.
     checkwriter::bind_test_results(!!!test_vec_results)
     checkwriter::checkwriter_abort(
       header = !!slow_error_header,
-      # TODO: UGGGGH, this won't do, since we need to make sure that `unvectorized_bullets`
-      # is included in the emission here... So we'll have to declare `slow_error_bullets_vec`
-      # with a reference to `unvectorized_bullets`
-      bullets = !!slow_error_bullets_vec,
+      bullets = !!slow_error_bullets,
       error_class = !!error_arguments$error_class,
       error_call = error_call,
       error_dots = !!error_arguments$error_dots
@@ -518,7 +609,34 @@ new_semi_vectorized_check <- function(
   out
 }
 
+# TODO: Test <checkwriter_semi_vectorized_check>!
+# TODO: <checkwriter_semi_vectorized_check> slow and fast versions
+
 # Helpers ----------------------------------------------------------------------
+
+new_return_value <- function(test_fmls, maybe_missing) {
+  # If `x` is the only test formal with no default, then just return `x`
+  no_default_fmls <- rlang::names2(keep(test_fmls, rlang::is_missing))
+  if (identical(no_default_fmls, "x")) {
+    return_value <- rlang::sym("x")
+    if (maybe_missing) {
+      return_value <- rlang::expr(rlang::maybe_missing(!!return_value))
+    }
+    return(return_value)
+  }
+
+  # If there are multiple no-default formals, then return a named list of
+  # all such formals, e.g. `list(x = x, y = y, z = z)`.
+  return_values <- symbol_dict(no_default_fmls)
+  if (maybe_missing) {
+    return_values <- map(
+      return_values,
+      \(value) rlang::expr(rlang::maybe_missing(!!value))
+    )
+  }
+  rlang::expr(list(!!!return_values))
+}
+
 
 error_arguments <- function(error_fmls_nms, fixed_fmls) {
   # If the required `error_*` formals appear in `fmls`, then we insert them as
@@ -554,11 +672,20 @@ slow_error_bullets <- function(default_error_bullets, fixed_fmls_nms) {
   }
 }
 
+# user facing ------------------------------------------------------------------
+
+# User facing helper to provide bullet options to `check()`
+#'@export
+switch_bullets <- function(pass, fail, untested) {
+  # TODO: Update this error
+  stop("Must be used within a call to `check()`.")
+}
+
 # internal ---------------------------------------------------------------------
 
 # These are functions which appear internally within a generated <check>.
 
-# Bind missing (AKA untested) `.t*` results in the parent environment to `NULL`.
+# Bind missing (AKA untested) `.t*` results in the parent environment to `NULL`
 #'@export
 bind_test_results <- function(...) {
   env <- rlang::caller_env()
@@ -571,7 +698,7 @@ bind_test_results <- function(...) {
   rlang::env_bind(env, !!!tests_to_bind)
 }
 
-# Unbind any `.t*.` test results from the parent environment.
+# Unbind any `.t*.` test results from the parent environment
 #'@export
 unbind_test_results <- function() {
   env <- rlang::caller_env()
@@ -584,9 +711,9 @@ unbind_test_results <- function() {
 }
 
 # Manage bullets used in the `check()` functions. Sets the default bullets for
-# `pass`, `fail`, and `untested` if they're not named.
+# `pass`, `fail`, and `untested` if they're not named
 #'@export
-switch_bullets <- function(
+internal_switch_bullets <- function(
     result,
     pass = character(),
     fail = character(),
@@ -597,20 +724,24 @@ switch_bullets <- function(
     if (!rlang::is_named(untested)) {
       names(untested) <- rep("i", length(untested))
     }
-    return(untested)
+    untested
   }
-  if (result) {
+  else if (result) {
     if (!rlang::is_named(pass)) {
       names(pass) <- rep("v", length(pass))
     }
-    return(pass)
+    pass
   }
-  if (!rlang::is_named(fail)) {
-    names(fail) <- rep("x", length(fail))
+  else {
+    if (!rlang::is_named(fail)) {
+      names(fail) <- rep("x", length(fail))
+    }
+    fail
   }
-  fail
 }
 
+# TODO: Eventually this should use `friendlyr::friendlyr_abort()`
+#
 # Custom `abort()` function
 #'@export
 checkwriter_abort <- function(
