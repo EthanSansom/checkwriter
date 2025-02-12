@@ -19,8 +19,6 @@ knitr::opts_chunk$set(
 )
 ```
 
-# checkwriter
-
 <!-- badges: start -->
 
 <!-- badges: end -->
